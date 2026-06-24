@@ -22,7 +22,8 @@
             ],
             "Resource": [
                 "arn:aws:cloudformation:*:613211402448:stack/sketchable-*/*",
-                "arn:aws:cloudformation:*:613211402448:stack/aws-sam-cli-managed-default/*"
+                "arn:aws:cloudformation:*:613211402448:stack/aws-sam-cli-managed-default/*",
+                "arn:aws:cloudformation:*:aws:transform/Serverless-2016-10-31"
             ]
         },
         {
