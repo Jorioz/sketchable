@@ -13,10 +13,13 @@
 
 version = 0.1
 
+# Prod updates the pre-existing all-in-one stack `sketchable` in place (it already
+# owns the Lambda/API + the sketches bucket & CloudFront). Do NOT use a new name
+# or the stack will try to recreate those existing resources.
 [prod.deploy.parameters]
-stack_name = "sketchable-prod"
+stack_name = "sketchable"
 resolve_s3 = true
-s3_prefix = "sketchable-prod"
+s3_prefix = "sketchable"
 confirm_changeset = false
 capabilities = "CAPABILITY_IAM"
 region = "us-east-2"
