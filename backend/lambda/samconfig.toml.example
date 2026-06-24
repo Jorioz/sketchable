@@ -1,0 +1,32 @@
+# Copy to samconfig.toml (gitignored). This file holds ONLY deployment settings
+# (stack name, region, etc.) — NOT parameters and NOT secrets.
+#
+# Stack parameters are assembled by scripts/deploy-backend.sh, which combines:
+#   - non-secret values from  backend/lambda/params/<env>.env   (committed-ish)
+#   - secrets pulled at deploy time from SSM SecureString:
+#       /sketchable/<env>/script-token-secret
+#       /sketchable/<env>/auth0-mgmt-client-secret
+#       /sketchable/<env>/vapid-private-key
+# and passes the COMPLETE set via `sam deploy --parameter-overrides`. (We don't
+# put parameter_overrides here because CLI overrides replace — not merge with —
+# the config file's, which would drop the SSM-sourced secrets.)
+
+version = 0.1
+
+[prod.deploy.parameters]
+stack_name = "sketchable-prod"
+resolve_s3 = true
+s3_prefix = "sketchable-prod"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+region = "us-east-2"
+image_repositories = []
+
+[staging.deploy.parameters]
+stack_name = "sketchable-staging"
+resolve_s3 = true
+s3_prefix = "sketchable-staging"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+region = "us-east-2"
+image_repositories = []

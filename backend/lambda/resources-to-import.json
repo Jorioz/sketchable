@@ -1,0 +1,6 @@
+[
+  {"ResourceType":"AWS::S3::Bucket","LogicalResourceId":"SketchBucket","ResourceIdentifier":{"BucketName":"sketchable-s3"}},
+  {"ResourceType":"AWS::S3::BucketPolicy","LogicalResourceId":"SketchBucketPolicy","ResourceIdentifier":{"Bucket":"sketchable-s3"}},
+  {"ResourceType":"AWS::CloudFront::OriginAccessControl","LogicalResourceId":"SketchOac","ResourceIdentifier":{"Id":"E39M5AFFBKN2PN"}},
+  {"ResourceType":"AWS::CloudFront::Distribution","LogicalResourceId":"SketchDistribution","ResourceIdentifier":{"Id":"E171KUDTWGKACS"}}
+]

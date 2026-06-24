@@ -1,0 +1,305 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+    Sketchable API (upload pipeline) — PHASE 2 (full stack). Run AFTER the existing
+    bucket / CloudFront / OAC are imported via template.import.yaml. Deploy to
+    us-east-2 (where sketchable-s3 and the distribution live).
+
+    The storage/CDN resources below mirror the live config so the import + this
+    update are non-destructive. This stage ADDS the Lambda + HTTP API.
+
+Parameters:
+    Auth0Domain:
+        Type: String
+        Description: Auth0 tenant domain, e.g. your-tenant.us.auth0.com (no scheme).
+    Auth0Audience:
+        Type: String
+        Description: Auth0 API identifier (audience) the access tokens are issued for.
+    Auth0MgmtClientId:
+        Type: String
+        Default: ""
+        Description: >
+            Client ID of the M2M app authorized for the Auth0 Management API
+            (scope: delete:users). Enables DELETE /me to remove the Auth0
+            identity; leave blank to wipe only S3 data.
+    Auth0MgmtClientSecret:
+        Type: String
+        Default: ""
+        NoEcho: true
+        Description: Client secret for the Auth0 Management API M2M app.
+    ScriptTokenSecret:
+        Type: String
+        Default: ""
+        NoEcho: true
+        Description: >
+            Secret used to sign long-lived, read-only "script tokens" that get
+            baked into a user's Scriptable widget (POST /me/script-token). Use a
+            long random string. Leave blank to disable the feature.
+    VapidPrivateKey:
+        Type: String
+        Default: ""
+        NoEcho: true
+        Description: >
+            VAPID private key (base64url) used to sign Web Push notifications
+            sent to a partner when a new sketch arrives. Generate a keypair once
+            with `vapid --gen`; put the public key in the frontend
+            (VITE_VAPID_PUBLIC_KEY). Leave blank to disable push notifications.
+    VapidSubject:
+        Type: String
+        Default: ""
+        Description: >
+            VAPID `sub` contact URI (e.g. mailto:you@example.com) the push
+            service can use to reach you about your pushes. Required when push
+            is enabled.
+    AllowedOrigin:
+        Type: String
+        Default: "*"
+        Description: CORS Access-Control-Allow-Origin (set to your frontend origin in prod).
+    BucketName:
+        Type: String
+        Description: Name of the existing private sketch bucket.
+        Default: sketchable-s3
+    ApiDomainName:
+        Type: String
+        Default: ""
+        Description: >
+            Optional custom domain for the HTTP API, e.g. api.sketchable.jorio.dev.
+            When set, ApiCertificateArn is required (an ACM cert in THIS region,
+            us-east-2). Leave blank to use the default execute-api URL.
+    ApiCertificateArn:
+        Type: String
+        Default: ""
+        Description: >
+            ACM certificate ARN for ApiDomainName. MUST be in the same region as
+            this stack (us-east-2) because HTTP APIs use REGIONAL custom domains.
+
+Conditions:
+    HasApiDomain: !Not [!Equals [!Ref ApiDomainName, ""]]
+
+Globals:
+    Function:
+        Timeout: 10
+        MemorySize: 256
+        Runtime: python3.12
+        # x86_64 matches the typical dev/build host, so `sam build --use-container`
+        # uses the native build image (no QEMU emulation) and pulls cleanly.
+        Architectures:
+            - x86_64
+
+Resources:
+    SketchableHttpApi:
+        Type: AWS::Serverless::HttpApi
+        Properties:
+            DefinitionBody:
+                openapi: 3.0.1
+                info:
+                    title: Sketchable API
+                    version: "1.0"
+                paths: {}
+            CorsConfiguration:
+                AllowOrigins:
+                    - !Ref AllowedOrigin
+                AllowHeaders:
+                    - Content-Type
+                    - Authorization
+                AllowMethods:
+                    - GET
+                    - POST
+                    - DELETE
+                    - OPTIONS
+
+    # --- Optional API custom domain (api.sketchable.jorio.dev) ---------------
+    # Regional domain + mapping onto the implicit $default stage. Output the
+    # RegionalDomainName to CNAME from Cloudflare. Only created when set.
+    ApiDomain:
+        Type: AWS::ApiGatewayV2::DomainName
+        Condition: HasApiDomain
+        Properties:
+            DomainName: !Ref ApiDomainName
+            DomainNameConfigurations:
+                - CertificateArn: !Ref ApiCertificateArn
+                  EndpointType: REGIONAL
+                  SecurityPolicy: TLS_1_2
+
+    ApiMapping:
+        Type: AWS::ApiGatewayV2::ApiMapping
+        Condition: HasApiDomain
+        Properties:
+            DomainName: !Ref ApiDomain
+            ApiId: !Ref SketchableHttpApi
+            Stage: "$default"
+
+    # --- Storage layer: existing private bucket (imported, us-east-2) ---------
+    SketchBucket:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        Properties:
+            BucketName: !Ref BucketName
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                BlockPublicPolicy: true
+                IgnorePublicAcls: true
+                RestrictPublicBuckets: true
+
+    # --- Compute layer: the upload gatekeeper Lambda (NEW) -------------------
+    SketchableApiFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            FunctionName: sketchable-api
+            CodeUri: ./
+            Handler: handler.lambda_handler
+            Description: Sketchable API handler — secure sketch upload + history manifest
+            Environment:
+                Variables:
+                    AUTH0_DOMAIN: !Ref Auth0Domain
+                    AUTH0_AUDIENCE: !Ref Auth0Audience
+                    AUTH0_MGMT_CLIENT_ID: !Ref Auth0MgmtClientId
+                    AUTH0_MGMT_CLIENT_SECRET: !Ref Auth0MgmtClientSecret
+                    SCRIPT_TOKEN_SECRET: !Ref ScriptTokenSecret
+                    VAPID_PRIVATE_KEY: !Ref VapidPrivateKey
+                    VAPID_SUBJECT: !Ref VapidSubject
+                    ALLOWED_ORIGIN: !Ref AllowedOrigin
+                    BUCKET_NAME: !Ref BucketName
+                    CDN_DOMAIN: !GetAtt SketchDistribution.DomainName
+            Policies:
+                # Least-privilege: read/write only objects under this bucket.
+                - S3CrudPolicy:
+                      BucketName: !Ref BucketName
+            Events:
+                Health:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /health
+                        Method: GET
+                Upload:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /upload
+                        Method: POST
+                ListSketches:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /sketches
+                        Method: GET
+                GetPairing:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /pair
+                        Method: GET
+                SetUsername:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /me/username
+                        Method: POST
+                IssueScriptToken:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /me/script-token
+                        Method: POST
+                RedeemCode:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /pair/redeem
+                        Method: POST
+                DeleteAccount:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /me
+                        Method: DELETE
+                SubscribePush:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /push/subscribe
+                        Method: POST
+                UnsubscribePush:
+                    Type: HttpApi
+                    Properties:
+                        ApiId: !Ref SketchableHttpApi
+                        Path: /push/subscribe
+                        Method: DELETE
+
+    # --- Delivery layer: existing OAC (imported, E39M5AFFBKN2PN) -------------
+    SketchOac:
+        Type: AWS::CloudFront::OriginAccessControl
+        DeletionPolicy: Retain
+        Properties:
+            OriginAccessControlConfig:
+                Name: oac-sketchable-s3.s3.us-east-2.amazonaws.com-mqobmmurr92
+                OriginAccessControlOriginType: s3
+                SigningBehavior: always
+                SigningProtocol: sigv4
+
+    # --- Delivery layer: existing distribution (imported, E171KUDTWGKACS) ----
+    # Mirrors live config: CachingOptimized, GET+HEAD, compress, WAF, IPv6.
+    SketchDistribution:
+        Type: AWS::CloudFront::Distribution
+        DeletionPolicy: Retain
+        Properties:
+            DistributionConfig:
+                Enabled: true
+                HttpVersion: http2
+                IPV6Enabled: true
+                PriceClass: PriceClass_All
+                WebACLId: "arn:aws:wafv2:us-east-1:613211402448:global/webacl/CreatedByCloudFront-aac4a19a/c566a6f2-4465-4b4c-805d-618497245084"
+                Origins:
+                    - Id: sketchable-s3.s3.us-east-2.amazonaws.com-mqobjqsm8sn
+                      DomainName: sketchable-s3.s3.us-east-2.amazonaws.com
+                      OriginAccessControlId: !Ref SketchOac
+                      S3OriginConfig:
+                          OriginAccessIdentity: ""
+                DefaultCacheBehavior:
+                    TargetOriginId: sketchable-s3.s3.us-east-2.amazonaws.com-mqobjqsm8sn
+                    ViewerProtocolPolicy: redirect-to-https
+                    Compress: true
+                    AllowedMethods: [GET, HEAD]
+                    CachedMethods: [GET, HEAD]
+                    # Managed CachePolicy: CachingOptimized
+                    CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+                ViewerCertificate:
+                    CloudFrontDefaultCertificate: true
+                Restrictions:
+                    GeoRestriction:
+                        RestrictionType: none
+
+    # --- Existing bucket policy (imported; mirrors live) ---------------------
+    SketchBucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        DeletionPolicy: Retain
+        Properties:
+            Bucket: !Ref SketchBucket
+            PolicyDocument:
+                Version: "2008-10-17"
+                Id: PolicyForCloudFrontPrivateContent
+                Statement:
+                    - Sid: AllowCloudFrontServicePrincipal
+                      Effect: Allow
+                      Principal:
+                          Service: cloudfront.amazonaws.com
+                      Action: s3:GetObject
+                      Resource: !Sub "arn:aws:s3:::${BucketName}/*"
+                      Condition:
+                          ArnLike:
+                              AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/E171KUDTWGKACS"
+
+Outputs:
+    ApiBaseUrl:
+        Description: Base URL for the Sketchable HTTP API
+        Value: !Sub "https://${SketchableHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+    CdnDomain:
+        Description: CloudFront domain for reading sketches
+        Value: !GetAtt SketchDistribution.DomainName
+    ApiCustomDomainTarget:
+        Condition: HasApiDomain
+        Description: >
+            CNAME target for ApiDomainName. In Cloudflare create a CNAME:
+            api(.staging).sketchable -> this value (set DNS-only / grey cloud).
+        Value: !GetAtt ApiDomain.RegionalDomainName

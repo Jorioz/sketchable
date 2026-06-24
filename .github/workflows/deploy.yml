@@ -1,0 +1,81 @@
+name: Deploy
+
+# main -> production, develop -> staging.
+# Web-hosting infra (S3+CloudFront) is provisioned out-of-band with
+# scripts/deploy-web-infra.sh; this pipeline only ships code.
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write      # required for AWS OIDC
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.pick.outputs.env }}
+      gh_environment: ${{ steps.pick.outputs.gh_environment }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "env=prod"            >> "$GITHUB_OUTPUT"
+            echo "gh_environment=production" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=staging"         >> "$GITHUB_OUTPUT"
+            echo "gh_environment=staging"    >> "$GITHUB_OUTPUT"
+          fi
+
+  backend:
+    needs: setup
+    runs-on: ubuntu-latest
+    environment: ${{ needs.setup.outputs.gh_environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: us-east-2
+      - name: Materialize non-secret params
+        run: |
+          mkdir -p backend/lambda/params
+          printf '%s\n' "${{ vars.BACKEND_PARAMS }}" > "backend/lambda/params/${{ needs.setup.outputs.env }}.env"
+      - name: Provide samconfig
+        run: cp backend/lambda/samconfig.toml.example backend/lambda/samconfig.toml
+      - name: Deploy backend
+        run: bash scripts/deploy-backend.sh ${{ needs.setup.outputs.env }}
+
+  frontend:
+    needs: setup
+    runs-on: ubuntu-latest
+    environment: ${{ needs.setup.outputs.gh_environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "npm", cache-dependency-path: frontend/package-lock.json }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: us-east-2
+      - name: Materialize build env
+        run: |
+          if [ "${{ needs.setup.outputs.env }}" = "prod" ]; then
+            printf '%s\n' "${{ vars.FRONTEND_ENV }}" > frontend/.env.production
+          else
+            printf '%s\n' "${{ vars.FRONTEND_ENV }}" > frontend/.env.staging
+          fi
+      - name: Build + publish
+        env:
+          WEB_BUCKET: ${{ vars.WEB_BUCKET }}
+          DISTRIBUTION_ID: ${{ vars.DISTRIBUTION_ID }}
+        run: bash scripts/deploy-frontend.sh ${{ needs.setup.outputs.env }}

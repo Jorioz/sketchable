@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+    Sketchable web app hosting — a private S3 bucket fronted by CloudFront with
+    Origin Access Control, serving the built Vite SPA at sketchable.jorio.dev
+    (and staging.sketchable.jorio.dev). Independent of the sketches stack.
+
+    Deploy this in us-east-1 OR us-east-2 — the bucket region is independent, but
+    the ACM cert in AcmCertificateArn MUST be in us-east-1 (CloudFront rule).
+
+Parameters:
+    WebBucketName:
+        Type: String
+        Description: Globally-unique name for the private web-hosting bucket.
+        Default: sketchable-web
+    DomainAliases:
+        Type: CommaDelimitedList
+        Description: >
+            CNAME(s) for the distribution, e.g. "sketchable.jorio.dev".
+            For staging use "staging.sketchable.jorio.dev".
+    AcmCertificateArn:
+        Type: String
+        Description: >
+            ACM certificate ARN covering DomainAliases. MUST be in us-east-1.
+    PriceClass:
+        Type: String
+        Default: PriceClass_100
+        AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+        Description: CloudFront price class (100 = NA/EU, cheapest).
+
+Resources:
+    WebBucket:
+        Type: AWS::S3::Bucket
+        # Keep the bucket if the stack is deleted, so the site URL/content survive
+        # an accidental teardown. Remove if you want full cleanup.
+        DeletionPolicy: Retain
+        UpdateReplacePolicy: Retain
+        Properties:
+            BucketName: !Ref WebBucketName
+            OwnershipControls:
+                Rules:
+                    - ObjectOwnership: BucketOwnerEnforced
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                BlockPublicPolicy: true
+                IgnorePublicAcls: true
+                RestrictPublicBuckets: true
+
+    WebOac:
+        Type: AWS::CloudFront::OriginAccessControl
+        Properties:
+            OriginAccessControlConfig:
+                Name: !Sub "oac-${WebBucketName}"
+                OriginAccessControlOriginType: s3
+                SigningBehavior: always
+                SigningProtocol: sigv4
+
+    WebDistribution:
+        Type: AWS::CloudFront::Distribution
+        Properties:
+            DistributionConfig:
+                Enabled: true
+                Comment: !Sub "Sketchable web app (${WebBucketName})"
+                HttpVersion: http2and3
+                IPV6Enabled: true
+                PriceClass: !Ref PriceClass
+                Aliases: !Ref DomainAliases
+                DefaultRootObject: index.html
+                Origins:
+                    - Id: web-s3-origin
+                      DomainName: !GetAtt WebBucket.RegionalDomainName
+                      OriginAccessControlId: !Ref WebOac
+                      S3OriginConfig:
+                          OriginAccessIdentity: ""
+                DefaultCacheBehavior:
+                    TargetOriginId: web-s3-origin
+                    ViewerProtocolPolicy: redirect-to-https
+                    Compress: true
+                    AllowedMethods: [GET, HEAD, OPTIONS]
+                    CachedMethods: [GET, HEAD]
+                    # Managed CachePolicy: CachingOptimized
+                    CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+                ViewerCertificate:
+                    AcmCertificateArn: !Ref AcmCertificateArn
+                    SslSupportMethod: sni-only
+                    MinimumProtocolVersion: TLSv1.2_2021
+                Restrictions:
+                    GeoRestriction:
+                        RestrictionType: none
+                # SPA deep-link support: an S3+OAC origin returns 403 for missing
+                # keys, so map both 403 and 404 to index.html with a 200.
+                CustomErrorResponses:
+                    - ErrorCode: 403
+                      ResponseCode: 200
+                      ResponsePagePath: /index.html
+                      ErrorCachingMinTTL: 10
+                    - ErrorCode: 404
+                      ResponseCode: 200
+                      ResponsePagePath: /index.html
+                      ErrorCachingMinTTL: 10
+
+    WebBucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket: !Ref WebBucket
+            PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    - Sid: AllowCloudFrontServicePrincipalReadOnly
+                      Effect: Allow
+                      Principal:
+                          Service: cloudfront.amazonaws.com
+                      Action: s3:GetObject
+                      Resource: !Sub "arn:aws:s3:::${WebBucketName}/*"
+                      Condition:
+                          StringEquals:
+                              AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}"
+
+Outputs:
+    BucketName:
+        Description: Bucket to `aws s3 sync` the built `dist/` into.
+        Value: !Ref WebBucket
+    DistributionId:
+        Description: CloudFront distribution id (for cache invalidation on deploy).
+        Value: !Ref WebDistribution
+    DistributionDomainName:
+        Description: CNAME target for Cloudflare (DNS-only) for each alias.
+        Value: !GetAtt WebDistribution.DomainName

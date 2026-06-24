@@ -1,0 +1,34 @@
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+secrets.json
+
+samconfig.toml
+.aws-sam/
+packaged.yaml
+
+# Backend stack non-secret params (real values); keep the .example templates.
+backend/lambda/params/*.env
+!backend/lambda/params/*.env.example
+
+# Claude Code per-user local settings (machine-specific; never shared)
+**/.claude/settings.local.json
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

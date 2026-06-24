@@ -1,0 +1,11 @@
+# Normalize line endings. Shell scripts MUST be LF or they break under Linux
+# bash (CI). Keep YAML/JSON config LF too for consistent cross-platform diffs.
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# Binary assets — never touch.
+*.png       binary
+*.pem       binary

@@ -1,0 +1,24 @@
+# Runtime dependencies for the Sketchable Lambda.
+#
+# boto3 / botocore are already provided by the AWS Lambda Python runtime, so they
+# are intentionally NOT pinned here (keeps the deployment package small). Install
+# boto3 locally only if you want to run the handler outside of Lambda:
+#
+#   pip install boto3
+#
+# For running the unit tests no dependencies are required — tests inject a fake
+# S3 client and never import boto3.
+#
+# PyJWT verifies Auth0 access tokens (RS256) against the tenant's JWKS. The
+# [crypto] extra pulls in `cryptography`, a NATIVE dependency — build with
+# `sam build --use-container` so the arm64 wheel matches the Lambda runtime.
+PyJWT[crypto]>=2.8.0
+
+# pywebpush sends the W3C Web Push notifications to a partner when a new sketch
+# is uploaded (POST /upload → _notify_partner). It pulls in `http_ece` and
+# `py-vapid`, and reuses `cryptography` (already required above) — so keep
+# building with `sam build --use-container` for the native wheels.
+pywebpush>=2.0.0
+
+# --- Local development only (uncommented by setup_venv.ps1) ---
+# boto3
