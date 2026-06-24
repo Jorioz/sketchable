@@ -21,6 +21,18 @@ case "$ENV" in
 esac
 
 cd "$FE"
+
+# Fail fast if the build env is missing/empty — otherwise Vite ships a bundle
+# with no Auth0 config and the live app silently can't log in.
+ENVFILE=".env.$MODE"
+if ! grep -qE '^VITE_AUTH0_DOMAIN=.+' "$ENVFILE" 2>/dev/null \
+   || ! grep -qE '^VITE_AUTH0_CLIENT_ID=.+' "$ENVFILE" 2>/dev/null; then
+    echo "ERROR: $ENVFILE is missing VITE_AUTH0_DOMAIN / VITE_AUTH0_CLIENT_ID." >&2
+    echo "In CI this comes from the FRONTEND_ENV GitHub *Variable* (not a Secret)" >&2
+    echo "on the '$ENV' environment. Locally, copy .env.$MODE.example -> .env.$MODE." >&2
+    exit 1
+fi
+
 npm ci
 npm run build -- --mode "$MODE"
 
