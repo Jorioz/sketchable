@@ -1,0 +1,141 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "CloudFormation",
+            "Effect": "Allow",
+            "Action": [
+                "cloudformation:CreateStack",
+                "cloudformation:UpdateStack",
+                "cloudformation:DeleteStack",
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResource",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:ListStackResources",
+                "cloudformation:GetTemplate",
+                "cloudformation:GetTemplateSummary",
+                "cloudformation:CreateChangeSet",
+                "cloudformation:DescribeChangeSet",
+                "cloudformation:ExecuteChangeSet",
+                "cloudformation:DeleteChangeSet"
+            ],
+            "Resource": [
+                "arn:aws:cloudformation:*:613211402448:stack/sketchable-*/*",
+                "arn:aws:cloudformation:*:613211402448:stack/aws-sam-cli-managed-default/*"
+            ]
+        },
+        {
+            "Sid": "CloudFormationValidate",
+            "Effect": "Allow",
+            "Action": "cloudformation:ValidateTemplate",
+            "Resource": "*"
+        },
+        {
+            "Sid": "DeployArtifactAndWebBuckets",
+            "Effect": "Allow",
+            "Action": "s3:*",
+            "Resource": [
+                "arn:aws:s3:::aws-sam-cli-managed-default-*",
+                "arn:aws:s3:::aws-sam-cli-managed-default-*/*",
+                "arn:aws:s3:::sketchable-*",
+                "arn:aws:s3:::sketchable-*/*"
+            ]
+        },
+        {
+            "Sid": "Lambda",
+            "Effect": "Allow",
+            "Action": "lambda:*",
+            "Resource": [
+                "arn:aws:lambda:*:613211402448:function:sketchable-*"
+            ]
+        },
+        {
+            "Sid": "ApiGateway",
+            "Effect": "Allow",
+            "Action": "apigateway:*",
+            "Resource": "arn:aws:apigateway:*::/*"
+        },
+        {
+            "Sid": "CloudFront",
+            "Effect": "Allow",
+            "Action": [
+                "cloudfront:CreateDistribution",
+                "cloudfront:UpdateDistribution",
+                "cloudfront:GetDistribution",
+                "cloudfront:GetDistributionConfig",
+                "cloudfront:TagResource",
+                "cloudfront:CreateOriginAccessControl",
+                "cloudfront:UpdateOriginAccessControl",
+                "cloudfront:GetOriginAccessControl",
+                "cloudfront:DeleteOriginAccessControl",
+                "cloudfront:CreateInvalidation",
+                "cloudfront:GetInvalidation",
+                "cloudfront:ListInvalidations"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "IamForSamRoles",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:PassRole",
+                "iam:TagRole",
+                "iam:UntagRole",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:PutRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:GetRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:ListAttachedRolePolicies"
+            ],
+            "Resource": "arn:aws:iam::613211402448:role/sketchable-*"
+        },
+        {
+            "Sid": "SsmSecretsRead",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters"
+            ],
+            "Resource": "arn:aws:ssm:*:613211402448:parameter/sketchable/*"
+        },
+        {
+            "Sid": "KmsDecryptForSsm",
+            "Effect": "Allow",
+            "Action": "kms:Decrypt",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": { "kms:ViaService": "ssm.us-east-2.amazonaws.com" }
+            }
+        },
+        {
+            "Sid": "LambdaLogGroups",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:DeleteLogGroup",
+                "logs:PutRetentionPolicy",
+                "logs:DeleteRetentionPolicy",
+                "logs:TagResource",
+                "logs:ListTagsForResource"
+            ],
+            "Resource": "arn:aws:logs:*:613211402448:log-group:/aws/lambda/sketchable-*"
+        },
+        {
+            "Sid": "ReadOnlyDescribe",
+            "Effect": "Allow",
+            "Action": [
+                "logs:DescribeLogGroups",
+                "acm:DescribeCertificate",
+                "acm:ListCertificates",
+                "apigateway:GET"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
