@@ -56,9 +56,13 @@ jobs:
         run: bash scripts/deploy-backend.sh ${{ needs.setup.outputs.env }}
 
   frontend:
-    needs: setup
+    # Runs after backend so the frontend (user-facing, URL-bearing) deployment is
+    # the LAST one recorded for the environment -> it stays the "Active" deployment.
+    needs: [setup, backend]
     runs-on: ubuntu-latest
-    environment: ${{ needs.setup.outputs.gh_environment }}
+    environment:
+      name: ${{ needs.setup.outputs.gh_environment }}
+      url: ${{ needs.setup.outputs.env == 'prod' && 'https://sketchable.jorio.dev' || 'https://staging.sketchable.jorio.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
