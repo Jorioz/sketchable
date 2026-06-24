@@ -72,9 +72,29 @@ Parameters:
         Description: >
             ACM certificate ARN for ApiDomainName. MUST be in the same region as
             this stack (us-east-2) because HTTP APIs use REGIONAL custom domains.
+    # --- Per-environment names/config. Defaults are PROD's exact live values, so
+    # --- deploying prod with defaults is a no-op; staging overrides them all.
+    FunctionName:
+        Type: String
+        Default: sketchable-api
+        Description: Lambda function name (must be unique per region — suffix for staging).
+    OacName:
+        Type: String
+        Default: oac-sketchable-s3.s3.us-east-2.amazonaws.com-mqobmmurr92
+        Description: CloudFront Origin Access Control name (must be unique per account).
+    WebACLId:
+        Type: String
+        Default: "arn:aws:wafv2:us-east-1:613211402448:global/webacl/CreatedByCloudFront-aac4a19a/c566a6f2-4465-4b4c-805d-618497245084"
+        Description: WAF web ACL ARN for the sketches distribution. Empty to disable (staging).
+    PriceClass:
+        Type: String
+        Default: PriceClass_All
+        AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+        Description: CloudFront price class for the sketches distribution.
 
 Conditions:
     HasApiDomain: !Not [!Equals [!Ref ApiDomainName, ""]]
+    HasWaf: !Not [!Equals [!Ref WebACLId, ""]]
 
 Globals:
     Function:
@@ -145,7 +165,7 @@ Resources:
     SketchableApiFunction:
         Type: AWS::Serverless::Function
         Properties:
-            FunctionName: sketchable-api
+            FunctionName: !Ref FunctionName
             CodeUri: ./
             Handler: handler.lambda_handler
             Description: Sketchable API handler — secure sketch upload + history manifest
@@ -233,7 +253,7 @@ Resources:
         DeletionPolicy: Retain
         Properties:
             OriginAccessControlConfig:
-                Name: oac-sketchable-s3.s3.us-east-2.amazonaws.com-mqobmmurr92
+                Name: !Ref OacName
                 OriginAccessControlOriginType: s3
                 SigningBehavior: always
                 SigningProtocol: sigv4
@@ -248,11 +268,11 @@ Resources:
                 Enabled: true
                 HttpVersion: http2
                 IPV6Enabled: true
-                PriceClass: PriceClass_All
-                WebACLId: "arn:aws:wafv2:us-east-1:613211402448:global/webacl/CreatedByCloudFront-aac4a19a/c566a6f2-4465-4b4c-805d-618497245084"
+                PriceClass: !Ref PriceClass
+                WebACLId: !If [HasWaf, !Ref WebACLId, !Ref "AWS::NoValue"]
                 Origins:
                     - Id: sketchable-s3.s3.us-east-2.amazonaws.com-mqobjqsm8sn
-                      DomainName: sketchable-s3.s3.us-east-2.amazonaws.com
+                      DomainName: !Sub "${BucketName}.s3.${AWS::Region}.amazonaws.com"
                       OriginAccessControlId: !Ref SketchOac
                       S3OriginConfig:
                           OriginAccessIdentity: ""
@@ -288,7 +308,7 @@ Resources:
                       Resource: !Sub "arn:aws:s3:::${BucketName}/*"
                       Condition:
                           ArnLike:
-                              AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/E171KUDTWGKACS"
+                              AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${SketchDistribution}"
 
 Outputs:
     ApiBaseUrl:
