@@ -155,6 +155,10 @@ Resources:
     ApiMapping:
         Type: AWS::ApiGatewayV2::ApiMapping
         Condition: HasApiDomain
+        # The implicit "$default" stage must exist before the mapping references
+        # it — without this DependsOn they create in parallel and the mapping can
+        # fail with "Invalid stage identifier specified".
+        DependsOn: SketchableHttpApiApiGatewayDefaultStage
         Properties:
             DomainName: !Ref ApiDomain
             ApiId: !Ref SketchableHttpApi
