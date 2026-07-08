@@ -86,10 +86,17 @@ Parameters:
         Type: String
         Default: "arn:aws:wafv2:us-east-1:613211402448:global/webacl/CreatedByCloudFront-aac4a19a/c566a6f2-4465-4b4c-805d-618497245084"
         Description: >-
-            WAF web ACL ARN for the sketches distribution (default = prod's WAF).
-            Set to "none" to disable on staging. We use a "none" sentinel rather
-            than an empty string because SAM drops empty-valued overrides, which
-            would silently fall back to this prod default.
+            WAF web ACL ARN attached to the sketches distribution when EnableWaf
+            is "true" (default = prod's WAF). Must always be a REAL, existing ARN
+            — CloudFront early-validation checks it exists even in envs that
+            disable the WAF — so gate on EnableWaf rather than blanking this.
+    EnableWaf:
+        Type: String
+        Default: "true"
+        AllowedValues: ["true", "false"]
+        Description: >-
+            Whether to attach WebACLId to the sketches distribution. Staging sets
+            "false" (no WAF) while leaving WebACLId at its valid prod default.
     PriceClass:
         Type: String
         Default: PriceClass_All
@@ -98,9 +105,7 @@ Parameters:
 
 Conditions:
     HasApiDomain: !Not [!Equals [!Ref ApiDomainName, ""]]
-    HasWaf: !And
-        - !Not [!Equals [!Ref WebACLId, ""]]
-        - !Not [!Equals [!Ref WebACLId, "none"]]     # "none" sentinel = WAF disabled (staging)
+    HasWaf: !Equals [!Ref EnableWaf, "true"]
 
 Globals:
     Function:
