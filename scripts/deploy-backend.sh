@@ -14,11 +14,16 @@ PARAMS_FILE="$LAMBDA_DIR/params/$ENV.env"
 
 [ -f "$PARAMS_FILE" ] || { echo "Missing $PARAMS_FILE (copy $ENV.env.example)"; exit 1; }
 
-# --- non-secret params from the env file --------------------------------------
+# Emit SAM's long parameter-override form. Unlike the `Key=Value` shorthand, this
+# accepts EMPTY values (e.g. WebACLId= to disable WAF on staging, or an absent SSM
+# secret that should leave a feature disabled) — the shorthand rejects those.
 OVERRIDES=()
+add_override() { OVERRIDES+=("ParameterKey=$1,ParameterValue=$2"); }
+
+# --- non-secret params from the env file --------------------------------------
 while IFS= read -r line; do
     case "$line" in ''|\#*) continue ;; esac      # skip blanks/comments
-    OVERRIDES+=("$line")
+    add_override "${line%%=*}" "${line#*=}"        # split on the first '='
 done < "$PARAMS_FILE"
 
 # --- secrets from SSM (empty if absent -> feature stays disabled) -------------
@@ -27,9 +32,9 @@ ssm() {
         --region "$REGION" --query Parameter.Value --output text 2>/dev/null || true
 }
 PREFIX="/sketchable/$ENV"
-OVERRIDES+=("ScriptTokenSecret=$(ssm "$PREFIX/script-token-secret")")
-OVERRIDES+=("Auth0MgmtClientSecret=$(ssm "$PREFIX/auth0-mgmt-client-secret")")
-OVERRIDES+=("VapidPrivateKey=$(ssm "$PREFIX/vapid-private-key")")
+add_override "ScriptTokenSecret"     "$(ssm "$PREFIX/script-token-secret")"
+add_override "Auth0MgmtClientSecret" "$(ssm "$PREFIX/auth0-mgmt-client-secret")"
+add_override "VapidPrivateKey"       "$(ssm "$PREFIX/vapid-private-key")"
 
 cd "$LAMBDA_DIR"
 sam build
