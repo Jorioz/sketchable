@@ -135,7 +135,12 @@ export default function SettingsScreen(nav: NavState) {
 
     return (
         <Layout screen="settings" {...nav}>
-            <div className="flex-1 flex flex-col gap-6 px-6 py-4">
+            <div
+                className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-6 px-6 py-4"
+                style={{
+                    paddingBottom: "calc(env(safe-area-inset-bottom) + 1.5rem)",
+                }}
+            >
                 {/* Account */}
                 <section className="flex items-center gap-3">
                     {user?.picture ? (
