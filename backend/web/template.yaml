@@ -26,6 +26,16 @@ Parameters:
         Default: PriceClass_100
         AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
         Description: CloudFront price class (100 = NA/EU, cheapest).
+    BasicAuthCredentials:
+        Type: String
+        Default: ""
+        NoEcho: true
+        Description: >
+            Optional HTTP Basic Auth gate for the whole site (used on staging).
+            Set to base64("user:password"); leave empty to disable.
+
+Conditions:
+    BasicAuthEnabled: !Not [!Equals [!Ref BasicAuthCredentials, ""]]
 
 Resources:
     WebBucket:
@@ -79,6 +89,11 @@ Resources:
                     CachedMethods: [GET, HEAD]
                     # Managed CachePolicy: CachingOptimized
                     CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+                    FunctionAssociations: !If
+                        - BasicAuthEnabled
+                        - - EventType: viewer-request
+                            FunctionARN: !GetAtt BasicAuthFunction.FunctionMetadata.FunctionARN
+                        - !Ref AWS::NoValue
                 ViewerCertificate:
                     AcmCertificateArn: !Ref AcmCertificateArn
                     SslSupportMethod: sni-only
@@ -97,6 +112,34 @@ Resources:
                       ResponseCode: 200
                       ResponsePagePath: /index.html
                       ErrorCachingMinTTL: 10
+
+    # Viewer-request Basic Auth gate. Responses generated here are returned to
+    # the viewer directly, so the 403->index.html CustomErrorResponses above do
+    # not swallow the 401 challenge.
+    BasicAuthFunction:
+        Type: AWS::CloudFront::Function
+        Condition: BasicAuthEnabled
+        Properties:
+            Name: !Sub "basic-auth-${WebBucketName}"
+            AutoPublish: true
+            FunctionConfig:
+                Comment: HTTP Basic Auth for the whole distribution
+                Runtime: cloudfront-js-2.0
+            FunctionCode: !Sub |
+                function handler(event) {
+                    var headers = event.request.headers;
+                    var expected = 'Basic ${BasicAuthCredentials}';
+                    if (headers.authorization && headers.authorization.value === expected) {
+                        return event.request;
+                    }
+                    return {
+                        statusCode: 401,
+                        statusDescription: 'Unauthorized',
+                        headers: {
+                            'www-authenticate': { value: 'Basic realm="Sketchable staging"' }
+                        }
+                    };
+                }
 
     WebBucketPolicy:
         Type: AWS::S3::BucketPolicy

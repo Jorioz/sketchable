@@ -4,6 +4,7 @@ import {
     IoCheckmark,
     IoClose,
     IoCreateOutline,
+    IoLogoGithub,
     IoLogOutOutline,
     IoNotificationsOffOutline,
     IoNotificationsOutline,
@@ -134,7 +135,9 @@ export default function SettingsScreen(nav: NavState) {
 
     return (
         <Layout screen="settings" {...nav}>
-            <div className="flex-1 flex flex-col gap-6 px-6 py-4">
+            {/* Single page, no scroll: spacing is kept tight so everything
+                (through the GitHub link) fits the viewport. */}
+            <div className="flex-1 min-h-0 flex flex-col gap-3 px-6 py-2">
                 {/* Account */}
                 <section className="flex items-center gap-3">
                     {user?.picture ? (
@@ -244,7 +247,7 @@ export default function SettingsScreen(nav: NavState) {
                         type="button"
                         onClick={copyScript}
                         disabled={copyingScript}
-                        className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-3 text-base font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
+                        className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-base font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
                     >
                         <IoCreateOutline className="size-5" />
                         {copyingScript
@@ -273,7 +276,7 @@ export default function SettingsScreen(nav: NavState) {
                                 type="button"
                                 onClick={() => void push.disable()}
                                 disabled={push.busy}
-                                className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-3 text-base font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
+                                className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-base font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
                             >
                                 <IoNotificationsOffOutline className="size-5" />
                                 {push.busy
@@ -285,7 +288,7 @@ export default function SettingsScreen(nav: NavState) {
                                 type="button"
                                 onClick={() => void push.enable()}
                                 disabled={!push.standalone || push.busy}
-                                className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-3 text-base font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
+                                className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-base font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100"
                             >
                                 <IoNotificationsOutline className="size-5" />
                                 {push.busy
@@ -316,7 +319,7 @@ export default function SettingsScreen(nav: NavState) {
                         render={
                             <button
                                 type="button"
-                                className="flex items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-3 text-base font-semibold text-white transition-transform active:scale-[0.98]"
+                                className="flex items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-base font-semibold text-white transition-transform active:scale-[0.98]"
                             >
                                 <IoLogOutOutline className="size-5" />
                                 Sign out
@@ -361,7 +364,7 @@ export default function SettingsScreen(nav: NavState) {
                         render={
                             <button
                                 type="button"
-                                className="flex items-center justify-center gap-2 rounded-full bg-red-500/15 px-5 py-3 text-base font-semibold text-red-300 transition-transform active:scale-[0.98]"
+                                className="flex items-center justify-center gap-2 rounded-full bg-red-500/15 px-5 py-2.5 text-base font-semibold text-red-300 transition-transform active:scale-[0.98]"
                             >
                                 <IoTrashOutline className="size-5" />
                                 Delete account
@@ -398,6 +401,18 @@ export default function SettingsScreen(nav: NavState) {
                         </AlertDialogFooter>
                     </AlertDialogContent>
                 </AlertDialog>
+
+                {/* Source link */}
+                <a
+                    href="https://github.com/Jorioz/sketchable"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="View source on GitHub"
+                    className="mt-2 flex items-center justify-center gap-1.5 text-xs text-neutral-400 transition-transform active:scale-95"
+                >
+                    <IoLogoGithub className="size-4" />
+                    GitHub
+                </a>
             </div>
         </Layout>
     );

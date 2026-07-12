@@ -3,8 +3,9 @@ import { Canvas, PencilBrush } from "fabric";
 import type { FabricObject, BaseBrush } from "fabric";
 import { GraphitePencilBrush } from "../brushes/GraphitePencilBrush";
 import { useLayers } from "../hooks/useLayers";
-import { useDrawing } from "../context/DrawingContext";
+import { useDrawing, MIN_ZOOM, MAX_ZOOM } from "../context/DrawingContext";
 import type { Tool } from "../context/DrawingContext";
+import { IoContract } from "react-icons/io5";
 
 type SketchCanvasProps = {
     onContentChange?: (hasContent: boolean) => void;
@@ -68,10 +69,146 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         color,
         opacity,
         brushSize,
+        zoom,
+        setZoom,
+        moveMode,
         setCanUndo,
         setCanRedo,
         registerHandlers,
     } = useDrawing();
+
+    // Zoom/pan viewport, applied identically to every layer canvas. Pan is in
+    // screen pixels, clamped so the (zoomed) canvas always covers the viewport.
+    const zoomRef = useRef(zoom);
+    const panRef = useRef({ x: 0, y: 0 });
+
+    const clampPan = (v: number, z: number, size: number) =>
+        Math.min(0, Math.max(size * (1 - z), v));
+
+    const applyViewport = () => {
+        const z = zoomRef.current;
+        const { x, y } = panRef.current;
+        Object.values(fabricCanvases.current).forEach((fc) => {
+            fc.setViewportTransform([z, 0, 0, z, x, y]);
+            fc.requestRenderAll();
+        });
+    };
+
+    // Zoom to `next`, keeping the canvas point under (cx, cy) — wrapper-local
+    // screen px — fixed. Used by wheel zoom and pinch; updates refs first so
+    // the zoom effect sees zoom === zoomRef and only re-clamps. Reads only
+    // refs and the stable setZoom, so stale closures are harmless.
+    const applyZoomAt = (next: number, cx: number, cy: number) => {
+        // Wrapper width == canvas size (square); read from the DOM so stale
+        // closures (the [] wheel effect) still see the current size.
+        const size = wrapperRef.current?.clientWidth ?? 0;
+        if (!size) return;
+        let z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+        // Sticky floor for continuous inputs (pinch/wheel): finger-lift jitter
+        // at the end of a pinch-out otherwise leaves the zoom at ~103-108%.
+        if (z < 1.05) z = MIN_ZOOM;
+        const prev = zoomRef.current;
+        panRef.current = {
+            x: clampPan(cx - (cx - panRef.current.x) * (z / prev), z, size),
+            y: clampPan(cy - (cy - panRef.current.y) * (z / prev), z, size),
+        };
+        zoomRef.current = z;
+        applyViewport();
+        setZoom(z);
+    };
+
+    // Desktop: zoom with the scroll wheel / trackpad, anchored at the cursor.
+    // Attached natively because React root wheel listeners are passive and
+    // preventDefault (needed to stop page scroll) would be ignored.
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const el = wrapperRef.current;
+        if (!el) return;
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault();
+            const rect = el.getBoundingClientRect();
+            applyZoomAt(
+                zoomRef.current * Math.exp(-e.deltaY * 0.0022),
+                e.clientX - rect.left,
+                e.clientY - rect.top,
+            );
+        };
+        el.addEventListener("wheel", onWheel, { passive: false });
+        return () => el.removeEventListener("wheel", onWheel);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Move mode: an overlay above the layers owns all pointer input, so Fabric
+    // never sees the gesture (no stray strokes/dots). One pointer drags to
+    // pan; two pinch to zoom, anchored at the finger centroid so the same
+    // gesture also pans.
+    const movePointers = useRef(new Map<number, { x: number; y: number }>());
+
+    const onMovePointerDown = (e: React.PointerEvent) => {
+        movePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+
+    const onMovePointerMove = (e: React.PointerEvent) => {
+        const pts = movePointers.current;
+        const self = pts.get(e.pointerId);
+        if (!self || !wrapperRef.current) return;
+        const size = wrapperRef.current.clientWidth;
+        if (pts.size === 1) {
+            panRef.current = {
+                x: clampPan(
+                    panRef.current.x + e.clientX - self.x,
+                    zoomRef.current,
+                    size,
+                ),
+                y: clampPan(
+                    panRef.current.y + e.clientY - self.y,
+                    zoomRef.current,
+                    size,
+                ),
+            };
+            pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            applyViewport();
+            return;
+        }
+        const other = [...pts.entries()].find(([id]) => id !== e.pointerId)?.[1];
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (!other) return;
+        const rect = wrapperRef.current.getBoundingClientRect();
+        const prevDist = Math.hypot(self.x - other.x, self.y - other.y);
+        const newDist = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+        const prevZ = zoomRef.current;
+        const z = prevDist > 0 ? prevZ * (newDist / prevDist) : prevZ;
+        // Shift pan by the centroid delta, then anchor the zoom at the new
+        // centroid: together this keeps the pinched spot under the fingers.
+        const prevCx = (self.x + other.x) / 2 - rect.left;
+        const prevCy = (self.y + other.y) / 2 - rect.top;
+        const newCx = (e.clientX + other.x) / 2 - rect.left;
+        const newCy = (e.clientY + other.y) / 2 - rect.top;
+        panRef.current = {
+            x: panRef.current.x + (newCx - prevCx),
+            y: panRef.current.y + (newCy - prevCy),
+        };
+        applyZoomAt(z, newCx, newCy);
+    };
+
+    const onMovePointerEnd = (e: React.PointerEvent) => {
+        const wasPinching = movePointers.current.size >= 2;
+        movePointers.current.delete(e.pointerId);
+        // Pinch just ended: if it left the zoom hovering near 100% (release
+        // micro-adjustments), settle it on exactly 100%.
+        if (
+            wasPinching &&
+            movePointers.current.size < 2 &&
+            zoomRef.current > MIN_ZOOM &&
+            zoomRef.current <= 1.1
+        ) {
+            zoomRef.current = MIN_ZOOM;
+            panRef.current = { x: 0, y: 0 };
+            applyViewport();
+            setZoom(MIN_ZOOM);
+        }
+    };
 
     const toolRef = useRef(tool);
     const colorRef = useRef(color);
@@ -205,6 +342,29 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         if (fc) applyBrush(fc, tool, color, brushSize, opacity);
     }, [tool, color, opacity, brushSize, activeLayerId]);
 
+    // Re-apply the viewport when zoom changes, keeping the visible center
+    // fixed, and whenever the canvas set or its size changes (new layers start
+    // at identity; a resize can leave the pan out of bounds).
+    useEffect(() => {
+        const size = canvasSize.width;
+        if (!size) return;
+        const prev = zoomRef.current;
+        if (zoom !== prev) {
+            const c = size / 2;
+            panRef.current = {
+                x: clampPan(c - (c - panRef.current.x) * (zoom / prev), zoom, size),
+                y: clampPan(c - (c - panRef.current.y) * (zoom / prev), zoom, size),
+            };
+            zoomRef.current = zoom;
+        } else {
+            panRef.current = {
+                x: clampPan(panRef.current.x, zoom, size),
+                y: clampPan(panRef.current.y, zoom, size),
+            };
+        }
+        applyViewport();
+    }, [zoom, canvasSize, layers]);
+
     useEffect(() => {
         const fc = fabricCanvases.current[activeLayerId];
         setCanUndo(!!fc && fc.getObjects().length > 0);
@@ -268,9 +428,16 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
                     const fc = fabricCanvases.current[layer.id];
                     if (!fc || !layer.visible) return;
                     ctx.globalAlpha = layer.opacity;
+                    // The element shows the zoomed viewport; render at identity
+                    // for the capture so the export is the full, unzoomed canvas.
+                    const vpt = [...fc.viewportTransform] as typeof fc.viewportTransform;
+                    fc.setViewportTransform([1, 0, 0, 1, 0, 0]);
+                    fc.renderAll();
                     // Source canvas may be retina-scaled (larger); drawImage with
                     // explicit dest size rescales it back to CSS pixels.
                     ctx.drawImage(fc.getElement(), 0, 0, width, height);
+                    fc.setViewportTransform(vpt);
+                    fc.renderAll();
                 });
                 ctx.globalAlpha = 1;
                 return out.toDataURL("image/png");
@@ -286,6 +453,7 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
 
     return (
         <div
+            ref={wrapperRef}
             className="mx-auto relative bg-white shadow-[0_2px_16px_rgba(0,0,0,0.10)] rounded-4xl overflow-hidden"
             style={
                 canvasSize.width
@@ -297,6 +465,25 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
             }
         >
             <div ref={containerRef} className="absolute inset-0" />
+            {moveMode && (
+                <div
+                    className="absolute inset-0 z-40 cursor-grab active:cursor-grabbing touch-none"
+                    onPointerDown={onMovePointerDown}
+                    onPointerMove={onMovePointerMove}
+                    onPointerUp={onMovePointerEnd}
+                    onPointerCancel={onMovePointerEnd}
+                />
+            )}
+            {zoom > 1 && (
+                <button
+                    type="button"
+                    onClick={() => setZoom(1)}
+                    className="absolute top-3 right-3 z-50 flex items-center gap-1 rounded-full bg-white/90 backdrop-blur px-3 py-1.5 text-[12px] font-semibold text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.12)] transition-transform active:scale-90"
+                >
+                    <IoContract className="size-3.5" />
+                    100%
+                </button>
+            )}
         </div>
     );
 }

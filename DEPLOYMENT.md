@@ -124,10 +124,11 @@ WEB_ALIASES=sketchable.jorio.dev \
 WEB_CERT_ARN=<us-east-1-cert-arn> \
   bash scripts/deploy-web-infra.sh prod
 
-# STAGING
+# STAGING (WEB_BASIC_AUTH gates the whole site behind HTTP Basic Auth)
 WEB_BUCKET=sketchable-web-staging \
 WEB_ALIASES=staging.sketchable.jorio.dev \
 WEB_CERT_ARN=<us-east-1-cert-arn-staging> \
+WEB_BASIC_AUTH='<user>:<password>' \
   bash scripts/deploy-web-infra.sh staging
 ```
 

@@ -85,7 +85,18 @@ Parameters:
     WebACLId:
         Type: String
         Default: "arn:aws:wafv2:us-east-1:613211402448:global/webacl/CreatedByCloudFront-aac4a19a/c566a6f2-4465-4b4c-805d-618497245084"
-        Description: WAF web ACL ARN for the sketches distribution. Empty to disable (staging).
+        Description: >-
+            WAF web ACL ARN attached to the sketches distribution when EnableWaf
+            is "true" (default = prod's WAF). Must always be a REAL, existing ARN
+            — CloudFront early-validation checks it exists even in envs that
+            disable the WAF — so gate on EnableWaf rather than blanking this.
+    EnableWaf:
+        Type: String
+        Default: "true"
+        AllowedValues: ["true", "false"]
+        Description: >-
+            Whether to attach WebACLId to the sketches distribution. Staging sets
+            "false" (no WAF) while leaving WebACLId at its valid prod default.
     PriceClass:
         Type: String
         Default: PriceClass_All
@@ -94,7 +105,7 @@ Parameters:
 
 Conditions:
     HasApiDomain: !Not [!Equals [!Ref ApiDomainName, ""]]
-    HasWaf: !Not [!Equals [!Ref WebACLId, ""]]
+    HasWaf: !Equals [!Ref EnableWaf, "true"]
 
 Globals:
     Function:
@@ -144,6 +155,10 @@ Resources:
     ApiMapping:
         Type: AWS::ApiGatewayV2::ApiMapping
         Condition: HasApiDomain
+        # The implicit "$default" stage must exist before the mapping references
+        # it — without this DependsOn they create in parallel and the mapping can
+        # fail with "Invalid stage identifier specified".
+        DependsOn: SketchableHttpApiApiGatewayDefaultStage
         Properties:
             DomainName: !Ref ApiDomain
             ApiId: !Ref SketchableHttpApi
