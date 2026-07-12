@@ -4,6 +4,7 @@ import {
     IoCheckmark,
     IoClose,
     IoCreateOutline,
+    IoLogoGithub,
     IoLogOutOutline,
     IoNotificationsOffOutline,
     IoNotificationsOutline,
@@ -398,6 +399,18 @@ export default function SettingsScreen(nav: NavState) {
                         </AlertDialogFooter>
                     </AlertDialogContent>
                 </AlertDialog>
+
+                {/* Source link */}
+                <a
+                    href="https://github.com/Jorioz/sketchable"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="View source on GitHub"
+                    className="mt-2 flex items-center justify-center gap-1.5 text-xs text-neutral-400 transition-transform active:scale-95"
+                >
+                    <IoLogoGithub className="size-4" />
+                    GitHub
+                </a>
             </div>
         </Layout>
     );
