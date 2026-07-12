@@ -7,6 +7,7 @@ import BrushSizeSelector from "../components/BrushSizeSelector";
 import ColorPicker from "../components/ColorPicker";
 import OpacitySlider from "../components/OpacitySlider";
 import ToolSelector from "../components/ToolSelector";
+import ZoomControl from "../components/ZoomControl";
 import { isIOS } from "@/lib/utils";
 import Layout from "../components/Layout";
 import type { NavState } from "../navigation";
@@ -25,6 +26,7 @@ export default function DrawingScreen(nav: NavState) {
                     {/* Top controls — undo/redo grouped left, clear + send right */}
                     <div className="flex items-center justify-between">
                         <UndoRedo />
+                        <ZoomControl />
                         <div className="flex items-center gap-1">
                             <ClearCanvas />
                             <SendNote onSent={nav.onNavigate} />

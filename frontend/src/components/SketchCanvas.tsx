@@ -5,7 +5,7 @@ import { GraphitePencilBrush } from "../brushes/GraphitePencilBrush";
 import { useLayers } from "../hooks/useLayers";
 import { useDrawing, MIN_ZOOM, MAX_ZOOM } from "../context/DrawingContext";
 import type { Tool } from "../context/DrawingContext";
-import ZoomControl from "./ZoomControl";
+import { IoContract } from "react-icons/io5";
 
 type SketchCanvasProps = {
     onContentChange?: (hasContent: boolean) => void;
@@ -71,7 +71,7 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         brushSize,
         zoom,
         setZoom,
-        panMode,
+        moveMode,
         setCanUndo,
         setCanRedo,
         registerHandlers,
@@ -81,9 +81,6 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
     // screen pixels, clamped so the (zoomed) canvas always covers the viewport.
     const zoomRef = useRef(zoom);
     const panRef = useRef({ x: 0, y: 0 });
-    const panPointerRef = useRef<{ id: number; x: number; y: number } | null>(
-        null,
-    );
 
     const clampPan = (v: number, z: number, size: number) =>
         Math.min(0, Math.max(size * (1 - z), v));
@@ -138,55 +135,49 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Touch: two-finger pinch zoom + pan. Events are intercepted in the
-    // capture phase (before Fabric's own listeners) once a second finger
-    // lands, and stay blocked until every finger lifts so Fabric never
-    // finalizes the stroke the first finger may have started — the partial
-    // stroke is discarded by clearing the drawing overlay.
-    const gesturePointers = useRef(new Map<number, { x: number; y: number }>());
-    const gestureActiveRef = useRef(false);
+    // Move mode: an overlay above the layers owns all pointer input, so Fabric
+    // never sees the gesture (no stray strokes/dots). One pointer drags to
+    // pan; two pinch to zoom, anchored at the finger centroid so the same
+    // gesture also pans.
+    const movePointers = useRef(new Map<number, { x: number; y: number }>());
 
-    const onGesturePointerDown = (e: React.PointerEvent) => {
-        if (e.pointerType !== "touch") return;
-        gesturePointers.current.set(e.pointerId, {
-            x: e.clientX,
-            y: e.clientY,
-        });
-        if (gestureActiveRef.current) {
-            e.stopPropagation();
-            return;
-        }
-        if (gesturePointers.current.size === 2) {
-            gestureActiveRef.current = true;
-            e.stopPropagation();
-            // Abort the stroke the first finger started: with drawing mode off
-            // Fabric won't finalize it into a path, and wiping the overlay
-            // context removes its preview.
-            const fc = fabricCanvases.current[activeLayerId];
-            if (fc) {
-                fc.isDrawingMode = false;
-                fc.clearContext(fc.contextTop);
-                fc.requestRenderAll();
-            }
-        }
+    const onMovePointerDown = (e: React.PointerEvent) => {
+        movePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        e.currentTarget.setPointerCapture(e.pointerId);
     };
 
-    const onGesturePointerMove = (e: React.PointerEvent) => {
-        if (!gestureActiveRef.current) return;
-        const pts = gesturePointers.current;
+    const onMovePointerMove = (e: React.PointerEvent) => {
+        const pts = movePointers.current;
         const self = pts.get(e.pointerId);
-        if (!self) return;
-        e.stopPropagation();
+        if (!self || !wrapperRef.current) return;
+        const size = wrapperRef.current.clientWidth;
+        if (pts.size === 1) {
+            panRef.current = {
+                x: clampPan(
+                    panRef.current.x + e.clientX - self.x,
+                    zoomRef.current,
+                    size,
+                ),
+                y: clampPan(
+                    panRef.current.y + e.clientY - self.y,
+                    zoomRef.current,
+                    size,
+                ),
+            };
+            pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            applyViewport();
+            return;
+        }
         const other = [...pts.entries()].find(([id]) => id !== e.pointerId)?.[1];
         pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        if (!other || pts.size !== 2 || !wrapperRef.current) return;
+        if (!other) return;
         const rect = wrapperRef.current.getBoundingClientRect();
         const prevDist = Math.hypot(self.x - other.x, self.y - other.y);
         const newDist = Math.hypot(e.clientX - other.x, e.clientY - other.y);
         const prevZ = zoomRef.current;
         const z = prevDist > 0 ? prevZ * (newDist / prevDist) : prevZ;
-        // Anchor so the canvas point under the previous centroid lands on the
-        // new centroid — this makes the same gesture both pinch and pan.
+        // Shift pan by the centroid delta, then anchor the zoom at the new
+        // centroid: together this keeps the pinched spot under the fingers.
         const prevCx = (self.x + other.x) / 2 - rect.left;
         const prevCy = (self.y + other.y) / 2 - rect.top;
         const newCx = (e.clientX + other.x) / 2 - rect.left;
@@ -198,18 +189,8 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         applyZoomAt(z, newCx, newCy);
     };
 
-    const onGesturePointerEnd = (e: React.PointerEvent) => {
-        if (e.pointerType !== "touch") return;
-        if (!gesturePointers.current.delete(e.pointerId)) return;
-        if (!gestureActiveRef.current) return;
-        e.stopPropagation();
-        // Keep blocking until every finger lifts, so Fabric never sees the
-        // tail of the gesture as drawing input.
-        if (gesturePointers.current.size === 0) {
-            gestureActiveRef.current = false;
-            const fc = fabricCanvases.current[activeLayerId];
-            if (fc) fc.isDrawingMode = true;
-        }
+    const onMovePointerEnd = (e: React.PointerEvent) => {
+        movePointers.current.delete(e.pointerId);
     };
 
     const toolRef = useRef(tool);
@@ -457,10 +438,6 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         <div
             ref={wrapperRef}
             className="mx-auto relative bg-white shadow-[0_2px_16px_rgba(0,0,0,0.10)] rounded-4xl overflow-hidden"
-            onPointerDownCapture={onGesturePointerDown}
-            onPointerMoveCapture={onGesturePointerMove}
-            onPointerUpCapture={onGesturePointerEnd}
-            onPointerCancelCapture={onGesturePointerEnd}
             style={
                 canvasSize.width
                     ? {
@@ -471,42 +448,25 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
             }
         >
             <div ref={containerRef} className="absolute inset-0" />
-            {panMode && (
+            {moveMode && (
                 <div
                     className="absolute inset-0 z-40 cursor-grab active:cursor-grabbing touch-none"
-                    onPointerDown={(e) => {
-                        panPointerRef.current = {
-                            id: e.pointerId,
-                            x: e.clientX,
-                            y: e.clientY,
-                        };
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                    }}
-                    onPointerMove={(e) => {
-                        const p = panPointerRef.current;
-                        if (!p || p.id !== e.pointerId) return;
-                        const size = canvasSize.width;
-                        panRef.current = {
-                            x: clampPan(
-                                panRef.current.x + e.clientX - p.x,
-                                zoomRef.current,
-                                size,
-                            ),
-                            y: clampPan(
-                                panRef.current.y + e.clientY - p.y,
-                                zoomRef.current,
-                                size,
-                            ),
-                        };
-                        p.x = e.clientX;
-                        p.y = e.clientY;
-                        applyViewport();
-                    }}
-                    onPointerUp={() => (panPointerRef.current = null)}
-                    onPointerCancel={() => (panPointerRef.current = null)}
+                    onPointerDown={onMovePointerDown}
+                    onPointerMove={onMovePointerMove}
+                    onPointerUp={onMovePointerEnd}
+                    onPointerCancel={onMovePointerEnd}
                 />
             )}
-            <ZoomControl />
+            {zoom > 1 && (
+                <button
+                    type="button"
+                    onClick={() => setZoom(1)}
+                    className="absolute top-3 right-3 z-50 flex items-center gap-1 rounded-full bg-white/90 backdrop-blur px-3 py-1.5 text-[12px] font-semibold text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.12)] transition-transform active:scale-90"
+                >
+                    <IoContract className="size-3.5" />
+                    100%
+                </button>
+            )}
         </div>
     );
 }
