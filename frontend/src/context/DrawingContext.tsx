@@ -3,6 +3,9 @@ import type { ReactNode } from 'react'
 
 export type Tool = 'marker' | 'pencil' | 'highlighter' | 'eraser'
 
+export const MIN_ZOOM = 1
+export const MAX_ZOOM = 3
+
 interface DrawingContextValue {
   tool: Tool
   setTool: (t: Tool) => void
@@ -12,6 +15,12 @@ interface DrawingContextValue {
   setOpacity: (v: number) => void
   brushSize: number
   setBrushSize: (s: number) => void
+  /** Canvas zoom factor, clamped to [MIN_ZOOM, MAX_ZOOM] (1 = 100%). */
+  zoom: number
+  setZoom: (z: number) => void
+  /** When true (only reachable while zoomed in), dragging pans instead of drawing. */
+  panMode: boolean
+  setPanMode: (v: boolean) => void
   canUndo: boolean
   setCanUndo: (v: boolean) => void
   canRedo: boolean
@@ -36,6 +45,8 @@ export function DrawingProvider({ children }: { children: ReactNode }) {
   const [color, setColor] = useState('#000000')
   const [opacity, setOpacity] = useState(1)
   const [brushSize, setBrushSize] = useState(6)
+  const [zoom, setZoomState] = useState(1)
+  const [panMode, setPanMode] = useState(false)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
 
@@ -43,6 +54,13 @@ export function DrawingProvider({ children }: { children: ReactNode }) {
   const redoRef = useRef<() => void>(() => {})
   const clearRef = useRef<() => void>(() => {})
   const exportRef = useRef<() => string | null>(() => null)
+
+  const setZoom = useCallback((z: number) => {
+    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z))
+    setZoomState(clamped)
+    // At 100% there is nothing to pan — drop back to drawing.
+    if (clamped === MIN_ZOOM) setPanMode(false)
+  }, [])
 
   const pickColor = useCallback((c: string) => {
     setColor(c)
@@ -75,6 +93,8 @@ export function DrawingProvider({ children }: { children: ReactNode }) {
       color, pickColor,
       opacity, setOpacity,
       brushSize, setBrushSize,
+      zoom, setZoom,
+      panMode, setPanMode,
       canUndo, setCanUndo,
       canRedo, setCanRedo,
       handleUndo, handleRedo, handleClear, handleExport,

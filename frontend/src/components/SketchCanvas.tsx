@@ -5,6 +5,7 @@ import { GraphitePencilBrush } from "../brushes/GraphitePencilBrush";
 import { useLayers } from "../hooks/useLayers";
 import { useDrawing } from "../context/DrawingContext";
 import type { Tool } from "../context/DrawingContext";
+import ZoomControl from "./ZoomControl";
 
 type SketchCanvasProps = {
     onContentChange?: (hasContent: boolean) => void;
@@ -68,10 +69,32 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         color,
         opacity,
         brushSize,
+        zoom,
+        panMode,
         setCanUndo,
         setCanRedo,
         registerHandlers,
     } = useDrawing();
+
+    // Zoom/pan viewport, applied identically to every layer canvas. Pan is in
+    // screen pixels, clamped so the (zoomed) canvas always covers the viewport.
+    const zoomRef = useRef(zoom);
+    const panRef = useRef({ x: 0, y: 0 });
+    const panPointerRef = useRef<{ id: number; x: number; y: number } | null>(
+        null,
+    );
+
+    const clampPan = (v: number, z: number, size: number) =>
+        Math.min(0, Math.max(size * (1 - z), v));
+
+    const applyViewport = () => {
+        const z = zoomRef.current;
+        const { x, y } = panRef.current;
+        Object.values(fabricCanvases.current).forEach((fc) => {
+            fc.setViewportTransform([z, 0, 0, z, x, y]);
+            fc.requestRenderAll();
+        });
+    };
 
     const toolRef = useRef(tool);
     const colorRef = useRef(color);
@@ -205,6 +228,29 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         if (fc) applyBrush(fc, tool, color, brushSize, opacity);
     }, [tool, color, opacity, brushSize, activeLayerId]);
 
+    // Re-apply the viewport when zoom changes, keeping the visible center
+    // fixed, and whenever the canvas set or its size changes (new layers start
+    // at identity; a resize can leave the pan out of bounds).
+    useEffect(() => {
+        const size = canvasSize.width;
+        if (!size) return;
+        const prev = zoomRef.current;
+        if (zoom !== prev) {
+            const c = size / 2;
+            panRef.current = {
+                x: clampPan(c - (c - panRef.current.x) * (zoom / prev), zoom, size),
+                y: clampPan(c - (c - panRef.current.y) * (zoom / prev), zoom, size),
+            };
+            zoomRef.current = zoom;
+        } else {
+            panRef.current = {
+                x: clampPan(panRef.current.x, zoom, size),
+                y: clampPan(panRef.current.y, zoom, size),
+            };
+        }
+        applyViewport();
+    }, [zoom, canvasSize, layers]);
+
     useEffect(() => {
         const fc = fabricCanvases.current[activeLayerId];
         setCanUndo(!!fc && fc.getObjects().length > 0);
@@ -268,9 +314,16 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
                     const fc = fabricCanvases.current[layer.id];
                     if (!fc || !layer.visible) return;
                     ctx.globalAlpha = layer.opacity;
+                    // The element shows the zoomed viewport; render at identity
+                    // for the capture so the export is the full, unzoomed canvas.
+                    const vpt = [...fc.viewportTransform] as typeof fc.viewportTransform;
+                    fc.setViewportTransform([1, 0, 0, 1, 0, 0]);
+                    fc.renderAll();
                     // Source canvas may be retina-scaled (larger); drawImage with
                     // explicit dest size rescales it back to CSS pixels.
                     ctx.drawImage(fc.getElement(), 0, 0, width, height);
+                    fc.setViewportTransform(vpt);
+                    fc.renderAll();
                 });
                 ctx.globalAlpha = 1;
                 return out.toDataURL("image/png");
@@ -297,6 +350,42 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
             }
         >
             <div ref={containerRef} className="absolute inset-0" />
+            {panMode && (
+                <div
+                    className="absolute inset-0 z-40 cursor-grab active:cursor-grabbing touch-none"
+                    onPointerDown={(e) => {
+                        panPointerRef.current = {
+                            id: e.pointerId,
+                            x: e.clientX,
+                            y: e.clientY,
+                        };
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                    }}
+                    onPointerMove={(e) => {
+                        const p = panPointerRef.current;
+                        if (!p || p.id !== e.pointerId) return;
+                        const size = canvasSize.width;
+                        panRef.current = {
+                            x: clampPan(
+                                panRef.current.x + e.clientX - p.x,
+                                zoomRef.current,
+                                size,
+                            ),
+                            y: clampPan(
+                                panRef.current.y + e.clientY - p.y,
+                                zoomRef.current,
+                                size,
+                            ),
+                        };
+                        p.x = e.clientX;
+                        p.y = e.clientY;
+                        applyViewport();
+                    }}
+                    onPointerUp={() => (panPointerRef.current = null)}
+                    onPointerCancel={() => (panPointerRef.current = null)}
+                />
+            )}
+            <ZoomControl />
         </div>
     );
 }
