@@ -103,7 +103,10 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         // closures (the [] wheel effect) still see the current size.
         const size = wrapperRef.current?.clientWidth ?? 0;
         if (!size) return;
-        const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+        let z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+        // Sticky floor for continuous inputs (pinch/wheel): finger-lift jitter
+        // at the end of a pinch-out otherwise leaves the zoom at ~103-108%.
+        if (z < 1.05) z = MIN_ZOOM;
         const prev = zoomRef.current;
         panRef.current = {
             x: clampPan(cx - (cx - panRef.current.x) * (z / prev), z, size),
@@ -190,7 +193,21 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
     };
 
     const onMovePointerEnd = (e: React.PointerEvent) => {
+        const wasPinching = movePointers.current.size >= 2;
         movePointers.current.delete(e.pointerId);
+        // Pinch just ended: if it left the zoom hovering near 100% (release
+        // micro-adjustments), settle it on exactly 100%.
+        if (
+            wasPinching &&
+            movePointers.current.size < 2 &&
+            zoomRef.current > MIN_ZOOM &&
+            zoomRef.current <= 1.1
+        ) {
+            zoomRef.current = MIN_ZOOM;
+            panRef.current = { x: 0, y: 0 };
+            applyViewport();
+            setZoom(MIN_ZOOM);
+        }
     };
 
     const toolRef = useRef(tool);
