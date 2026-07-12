@@ -3,7 +3,7 @@ import { Canvas, PencilBrush } from "fabric";
 import type { FabricObject, BaseBrush } from "fabric";
 import { GraphitePencilBrush } from "../brushes/GraphitePencilBrush";
 import { useLayers } from "../hooks/useLayers";
-import { useDrawing } from "../context/DrawingContext";
+import { useDrawing, MIN_ZOOM, MAX_ZOOM } from "../context/DrawingContext";
 import type { Tool } from "../context/DrawingContext";
 import ZoomControl from "./ZoomControl";
 
@@ -70,6 +70,7 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
         opacity,
         brushSize,
         zoom,
+        setZoom,
         panMode,
         setCanUndo,
         setCanRedo,
@@ -94,6 +95,121 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
             fc.setViewportTransform([z, 0, 0, z, x, y]);
             fc.requestRenderAll();
         });
+    };
+
+    // Zoom to `next`, keeping the canvas point under (cx, cy) — wrapper-local
+    // screen px — fixed. Used by wheel zoom and pinch; updates refs first so
+    // the zoom effect sees zoom === zoomRef and only re-clamps. Reads only
+    // refs and the stable setZoom, so stale closures are harmless.
+    const applyZoomAt = (next: number, cx: number, cy: number) => {
+        // Wrapper width == canvas size (square); read from the DOM so stale
+        // closures (the [] wheel effect) still see the current size.
+        const size = wrapperRef.current?.clientWidth ?? 0;
+        if (!size) return;
+        const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+        const prev = zoomRef.current;
+        panRef.current = {
+            x: clampPan(cx - (cx - panRef.current.x) * (z / prev), z, size),
+            y: clampPan(cy - (cy - panRef.current.y) * (z / prev), z, size),
+        };
+        zoomRef.current = z;
+        applyViewport();
+        setZoom(z);
+    };
+
+    // Desktop: zoom with the scroll wheel / trackpad, anchored at the cursor.
+    // Attached natively because React root wheel listeners are passive and
+    // preventDefault (needed to stop page scroll) would be ignored.
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const el = wrapperRef.current;
+        if (!el) return;
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault();
+            const rect = el.getBoundingClientRect();
+            applyZoomAt(
+                zoomRef.current * Math.exp(-e.deltaY * 0.0022),
+                e.clientX - rect.left,
+                e.clientY - rect.top,
+            );
+        };
+        el.addEventListener("wheel", onWheel, { passive: false });
+        return () => el.removeEventListener("wheel", onWheel);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Touch: two-finger pinch zoom + pan. Events are intercepted in the
+    // capture phase (before Fabric's own listeners) once a second finger
+    // lands, and stay blocked until every finger lifts so Fabric never
+    // finalizes the stroke the first finger may have started — the partial
+    // stroke is discarded by clearing the drawing overlay.
+    const gesturePointers = useRef(new Map<number, { x: number; y: number }>());
+    const gestureActiveRef = useRef(false);
+
+    const onGesturePointerDown = (e: React.PointerEvent) => {
+        if (e.pointerType !== "touch") return;
+        gesturePointers.current.set(e.pointerId, {
+            x: e.clientX,
+            y: e.clientY,
+        });
+        if (gestureActiveRef.current) {
+            e.stopPropagation();
+            return;
+        }
+        if (gesturePointers.current.size === 2) {
+            gestureActiveRef.current = true;
+            e.stopPropagation();
+            // Abort the stroke the first finger started: with drawing mode off
+            // Fabric won't finalize it into a path, and wiping the overlay
+            // context removes its preview.
+            const fc = fabricCanvases.current[activeLayerId];
+            if (fc) {
+                fc.isDrawingMode = false;
+                fc.clearContext(fc.contextTop);
+                fc.requestRenderAll();
+            }
+        }
+    };
+
+    const onGesturePointerMove = (e: React.PointerEvent) => {
+        if (!gestureActiveRef.current) return;
+        const pts = gesturePointers.current;
+        const self = pts.get(e.pointerId);
+        if (!self) return;
+        e.stopPropagation();
+        const other = [...pts.entries()].find(([id]) => id !== e.pointerId)?.[1];
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (!other || pts.size !== 2 || !wrapperRef.current) return;
+        const rect = wrapperRef.current.getBoundingClientRect();
+        const prevDist = Math.hypot(self.x - other.x, self.y - other.y);
+        const newDist = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+        const prevZ = zoomRef.current;
+        const z = prevDist > 0 ? prevZ * (newDist / prevDist) : prevZ;
+        // Anchor so the canvas point under the previous centroid lands on the
+        // new centroid — this makes the same gesture both pinch and pan.
+        const prevCx = (self.x + other.x) / 2 - rect.left;
+        const prevCy = (self.y + other.y) / 2 - rect.top;
+        const newCx = (e.clientX + other.x) / 2 - rect.left;
+        const newCy = (e.clientY + other.y) / 2 - rect.top;
+        panRef.current = {
+            x: panRef.current.x + (newCx - prevCx),
+            y: panRef.current.y + (newCy - prevCy),
+        };
+        applyZoomAt(z, newCx, newCy);
+    };
+
+    const onGesturePointerEnd = (e: React.PointerEvent) => {
+        if (e.pointerType !== "touch") return;
+        if (!gesturePointers.current.delete(e.pointerId)) return;
+        if (!gestureActiveRef.current) return;
+        e.stopPropagation();
+        // Keep blocking until every finger lifts, so Fabric never sees the
+        // tail of the gesture as drawing input.
+        if (gesturePointers.current.size === 0) {
+            gestureActiveRef.current = false;
+            const fc = fabricCanvases.current[activeLayerId];
+            if (fc) fc.isDrawingMode = true;
+        }
     };
 
     const toolRef = useRef(tool);
@@ -339,7 +455,12 @@ export default function SketchCanvas({ onContentChange }: SketchCanvasProps) {
 
     return (
         <div
+            ref={wrapperRef}
             className="mx-auto relative bg-white shadow-[0_2px_16px_rgba(0,0,0,0.10)] rounded-4xl overflow-hidden"
+            onPointerDownCapture={onGesturePointerDown}
+            onPointerMoveCapture={onGesturePointerMove}
+            onPointerUpCapture={onGesturePointerEnd}
+            onPointerCancelCapture={onGesturePointerEnd}
             style={
                 canvasSize.width
                     ? {
