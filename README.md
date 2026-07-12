@@ -1,9 +1,7 @@
 # Sketchable
 
-A mobile-first drawing app for two. You and your partner pair up once; after
-that, every sketch you draw shows up on their phone — in the app, as a push
-notification, and on their iOS home screen via a
-[Scriptable](https://scriptable.app) widget.
+A progressive web app inspired by sketch/note drawing apps such as noteit.
+Tailored for iOS mobile users. Widget support included provided via [Scriptable](https://scriptable.app)
 
 ## How it works
 
