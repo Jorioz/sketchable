@@ -7,6 +7,7 @@ import {
     IoHeartOutline,
 } from "react-icons/io5";
 import FullScreen from "../components/FullScreen";
+import Loader from "../components/Loader";
 import { redeemCode, ApiError, type Pairing } from "../lib/api";
 
 // Shown after sign-in, before the app unlocks. Two ways to bind a couple:
@@ -119,7 +120,7 @@ export default function PairingScreen({
                         </div>
                     </div>
                     <p className="flex items-center gap-2 text-xs text-white/40">
-                        <span className="inline-block size-1.5 animate-pulse rounded-full bg-blue-400" />
+                        <Loader size={20} />
                         Waiting to pair...
                     </p>
                 </section>

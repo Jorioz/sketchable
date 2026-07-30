@@ -1,14 +1,22 @@
 import { useState, type ReactNode } from "react";
 import Layout from "../components/Layout";
+import Loader from "../components/Loader";
 import SketchDetailDialog from "../components/SketchDetailDialog";
 import { useSession } from "../context/SessionContext";
 import { useSketchFeed, type FeedSketch } from "../hooks/useSketchFeed";
 import { cn } from "../lib/utils";
 import type { NavState } from "../navigation";
 
-function Centered({ children }: { children: ReactNode }) {
+function Centered({
+    children,
+    loader = false,
+}: {
+    children: ReactNode;
+    loader?: boolean;
+}) {
     return (
-        <div className="flex-1 flex items-center justify-center px-6 text-center">
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
+            {loader && <Loader />}
             <p className="text-lg font-medium text-white/80">{children}</p>
         </div>
     );
@@ -21,7 +29,7 @@ export default function HomeScreen(nav: NavState) {
 
     let content: ReactNode;
     if (loading && sketches.length === 0) {
-        content = <Centered>Loading sketches…</Centered>;
+        content = <Centered loader>Loading sketches…</Centered>;
     } else if (error && sketches.length === 0) {
         content = <Centered>{error}</Centered>;
     } else if (sketches.length === 0) {
