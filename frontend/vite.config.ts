@@ -6,8 +6,9 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
     plugins: [react(), tailwindcss(), basicSsl()],
+    // HTTPS on the dev server comes from basicSsl() above, which injects a
+    // self-signed cert into server.https — needed to test the PWA/push on iOS.
     server: {
-        https: true,
         host: true,
     },
     resolve: {
